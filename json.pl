@@ -1,5 +1,4 @@
 #!/usr/bin/perl
-
 use strict;
 use warnings;
 use JSON;
@@ -24,16 +23,48 @@ sub get_package_name{
     $json = $json->utf8([1]);
     my $graph = $json->utf8->decode($response);
     my @nodes= @{$graph->{'data'}{'incidents'}{'edges'}[0]{'node'}{'incidentpackagesSet'}{'edges'}};
-    my $n = @nodes;
     foreach (@nodes){
-        print ("$_->{'node'}{'package'}{'name'}");
         push(@packages, $_->{'node'}{'package'}{'name'});
     }
     return @packages;
 }
 
+sub get_bins_for_packageXmodule{
+    my $package = $_[0];
+    my $module = $_[1];
+    my $su = $_[2];
+    my $response = qx(curl "https://smelt.suse.de/api/v1/basic/maintained/$package/" 2>/dev/null);
+    my $graph = JSON->new->utf8->decode($response);
+    my @bins;
+    if ( exists( $graph->{$module})) {
+        my @keys = keys % {$graph->{$module}};
+        my $upd_key = first {m/Update\b/} @keys;
+        my @hashes = @{$graph->{$module}{$upd_key}};
+        foreach  (@hashes) {
+            push @bins, $_->{'name'};
+        }
+    }
+    return @bins;
+}
+
 #Get JSON of maintenance status
 my @packages = get_package_name(13024);
-my @repos = qw{"http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Basesystem_15-SP1_x86_64/"};
-my @products = grep (m{SUSE_Updates_(?<product>.*)/}, @repos);
-print "Pr: @products";
+my @repos = qw{ 	http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Basesystem_15-SP1_x86_64/ http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Server-Applications_15-SP1_x86_64/};
+my @modules;
+my @transform = grep(m{SUSE_Updates_(?<product>.*)/}, @repos);
+print "@transform\n";
+foreach (@repos){
+    if ($_=~ m{SUSE_Updates_(?<product>.*)/}){
+        push(@modules, $+{product});
+    }
+}
+my @binaries;
+foreach my $p (@packages){
+    foreach my $m (@modules){
+        print "PM: $p $m\n";
+        push @binaries , get_bins_for_packageXmodule($p,$m,'l3');
+#        push @binaries  {$graph->{$_}{$upd_key}};
+    }
+}
+print Dumper(@binaries);
+
