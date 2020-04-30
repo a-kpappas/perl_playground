@@ -14,14 +14,12 @@ sub query_smelt {
     return $response;
 }
 
-sub get_package_name{
+sub get_packages_in_RR{
     my $rr= $_[0] ;
     my $gql_query = "{incidents(incidentId: $rr){edges{node{incidentpackagesSet{edges{node{package{name}}}}}}}}";
     my $response = query_smelt($gql_query);
     my @packages;
-    my $json = JSON->new;
-    $json = $json->utf8([1]);
-    my $graph = $json->utf8->decode($response);
+    my $graph = JSON->new->utf8->decode($response);
     my @nodes= @{$graph->{'data'}{'incidents'}{'edges'}[0]{'node'}{'incidentpackagesSet'}{'edges'}};
     foreach (@nodes){
         push(@packages, $_->{'node'}{'package'}{'name'});
@@ -30,9 +28,7 @@ sub get_package_name{
 }
 
 sub get_bins_for_packageXmodule{
-    my $package = $_[0];
-    my $module = $_[1];
-    my $su = $_[2];
+    (my $package, my $module) = ($_[0], $_[1]);
     my $response = qx(curl "https://smelt.suse.de/api/v1/basic/maintained/$package/" 2>/dev/null);
     my $graph = JSON->new->utf8->decode($response);
     my @bins;
@@ -41,30 +37,28 @@ sub get_bins_for_packageXmodule{
         my $upd_key = first {m/Update\b/} @keys;
         my @hashes = @{$graph->{$module}{$upd_key}};
         foreach  (@hashes) {
-            push @bins, $_->{'name'};
+            push @bins, $_;
         }
     }
     return @bins;
 }
 
 #Get JSON of maintenance status
-my @packages = get_package_name(13024);
-my @repos = qw{ 	http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Basesystem_15-SP1_x86_64/ http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Server-Applications_15-SP1_x86_64/};
+my @packages = get_packages_in_RR(13024);
+my @repos = qw{ http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Basesystem_15-SP1_x86_64/ http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Server-Applications_15-SP1_x86_64/};
 my @modules;
-my @transform = grep(m{SUSE_Updates_(?<product>.*)/}, @repos);
-print "@transform\n";
 foreach (@repos){
     if ($_=~ m{SUSE_Updates_(?<product>.*)/}){
         push(@modules, $+{product});
     }
 }
+
 my @binaries;
 foreach my $p (@packages){
     foreach my $m (@modules){
-        print "PM: $p $m\n";
-        push @binaries , get_bins_for_packageXmodule($p,$m,'l3');
-#        push @binaries  {$graph->{$_}{$upd_key}};
+        push @binaries , get_bins_for_packageXmodule($p,$m);
     }
 }
+
 print Dumper(@binaries);
 
