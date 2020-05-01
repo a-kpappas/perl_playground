@@ -4,42 +4,38 @@ use warnings;
 use JSON;
 use Data::Dumper;
 use List::Util qw(first);
+use List::MoreUtils qw(pairwise);
 
 sub query_smelt {
     my $graphql = $_[0];
-    my $api_url = qq( --request POST  https://smelt.suse.de/graphql/);
-    my $header = qq( --header "Content-Type: application/json");
+    my $api_url = "--request POST https://smelt.suse.de/graphql/";
+    my $header = '--header "Content-Type: application/json"';
     my $data = qq( --data '{"query": "$graphql"}');
-    my $response = qx(curl $api_url $header $data 2>/dev/null );
-    return $response;
+    return  qx(curl $api_url $header $data 2>/dev/null );
 }
 
 sub get_packages_in_RR{
     my $rr= $_[0] ;
     my $gql_query = "{incidents(incidentId: $rr){edges{node{incidentpackagesSet{edges{node{package{name}}}}}}}}";
-    my $response = query_smelt($gql_query);
-    my @packages;
-    my $graph = JSON->new->utf8->decode($response);
+    my $graph = JSON->new->utf8->decode( query_smelt($gql_query));
     my @nodes= @{$graph->{'data'}{'incidents'}{'edges'}[0]{'node'}{'incidentpackagesSet'}{'edges'}};
-    foreach (@nodes){
-        push(@packages, $_->{'node'}{'package'}{'name'});
-    }
+    my @packages = map { $_->{'node'}{'package'}{'name'} } @nodes;
     return @packages;
 }
 
 sub get_bins_for_packageXmodule{
-    (my $package, my $module) = ($_[0], $_[1]);
+    (my $package, my $module_ref) = ($_[0], $_[1]);
     my $response = qx(curl "https://smelt.suse.de/api/v1/basic/maintained/$package/" 2>/dev/null);
     my $graph = JSON->new->utf8->decode($response);
     my @bins;
-    if ( exists( $graph->{$module})) {
-        my @keys = keys % {$graph->{$module}};
-        my $upd_key = first {m/Update\b/} @keys;
-        my @hashes = @{$graph->{$module}{$upd_key}};
-        foreach  (@hashes) {
-            push @bins, $_;
+    foreach my $m (@{$module_ref}) {
+        if ( exists( $graph->{$m})) {
+            my @keys = keys % {$graph->{$m}};
+            my $upd_key = first {m/Update\b/} @keys;
+            push (@bins, @{$graph->{$m}{$upd_key}});
         }
     }
+    print Dumper(@bins);
     return @bins;
 }
 
@@ -53,12 +49,10 @@ foreach (@repos){
     }
 }
 
+print "Packages: @packages, Modules: @modules\n";
 my @binaries;
 foreach my $p (@packages){
-    foreach my $m (@modules){
-        push @binaries , get_bins_for_packageXmodule($p,$m);
-    }
+    push( @binaries, get_bins_for_packageXmodule($p,\@modules));
 }
 
-print Dumper(@binaries);
-
+#print Dumper(@binaries);
