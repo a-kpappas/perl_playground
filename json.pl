@@ -41,7 +41,40 @@ sub get_bins_for_packageXmodule{
 
 #Get JSON of maintenance status
 my @packages = get_packages_in_RR(13024);
-my @repos = qw{ http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Basesystem_15-SP1_x86_64/ http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Server-Applications_15-SP1_x86_64/};
+
+my $incident_repos ="http://download.suse.de/ibs/SUSE:/Maintenance:/14916/SUSE_Updates_SLE-Module-Python2_15-SP1_x86_64/,http://download.suse.de/ibs/SUSE:/Maintenance:/14916/SUSE_Updates_SLE-Module-Basesystem_15-SP1_x86_64/";
+
+my @repos = split(',',$incident_repos);
+print Dumper(@repos);
+
+@repos = qw{ http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Basesystem_15-SP1_x86_64/ http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Server-Applications_15-SP1_x86_64/};
+
+
+sub zypper_search {
+    my $params = shift;
+    my @fields = ('status', 'name', 'type', 'version', 'arch', 'repository');
+    my @ret;
+
+    my $output = qx{zypper -n se -s $params};
+    print $output."\n";
+
+    for my $line (split /\n/, $output) {
+        my @tokens = split /\s*\|\s*/, $line;
+        next if $#tokens < $#fields;
+        my %tmp;
+
+        for (my $i = 0; $i < scalar @fields; $i++) {
+            $tmp{$fields[$i]} = $tokens[$i];
+        }
+
+        push @ret, \%tmp;
+    }
+    # Remove header from package list
+    shift @ret;
+    return \@ret;
+}
+
+
 my @modules;
 foreach (@repos){
     if ($_=~ m{SUSE_Updates_(?<product>.*)/}){
@@ -55,4 +88,12 @@ foreach my $p (@packages){
     push( @binaries, get_bins_for_packageXmodule($p,\@modules));
 }
 
+my @l3 = grep{ $_->{'supportstatus'} eq 'l3' } @binaries;
+my @bind = zypper_search('--match-exact ypbindsad');
+if (@bind == []){
+    print "TRUE!";
+}
+print Dumper(@bind);
+
 #print Dumper(@binaries);
+             
