@@ -87,13 +87,14 @@ my @binaries;
 foreach my $p (@packages){
     push( @binaries, get_bins_for_packageXmodule($p,\@modules));
 }
-
-my @l3 = grep{ $_->{'supportstatus'} eq 'l3' } @binaries;
-my @bind = zypper_search('--match-exact ypbindsad');
-if (@bind == []){
-    print "TRUE!";
+print Dumper(@binaries);
+my @names = map {$_->{'name'}} @binaries;
+print Dumper(@names);
+my $seref = zypper_search("--match-exact -i @names");
+foreach ( @{$seref} ){
+    print "$_->{'version'}\n";
 }
-print Dumper(@bind);
+#print Dumper($seref);
 
-#print Dumper(@binaries);
+#print "New: ".Dumper(@new_binaries);
              
