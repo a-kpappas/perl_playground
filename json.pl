@@ -1,10 +1,11 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
+use version;
 use JSON;
 use Data::Dumper;
 use List::Util qw(first);
-use List::MoreUtils qw(pairwise);
+#use List::MoreUtils qw(pairwise);
 
 sub query_smelt {
     my $graphql = $_[0];
@@ -24,31 +25,24 @@ sub get_packages_in_RR{
 }
 
 sub get_bins_for_packageXmodule{
+    # This function uses the term package in the way that SMELT uses it. Not as
+    # an rpm but as a set of binaries that receive varying levels of support and are
+    # spread through modules.
     (my $package, my $module_ref) = ($_[0], $_[1]);
     my $response = qx(curl "https://smelt.suse.de/api/v1/basic/maintained/$package/" 2>/dev/null);
     my $graph = JSON->new->utf8->decode($response);
-    my @bins;
-    foreach my $m (@{$module_ref}) {
-        if ( exists( $graph->{$m})) {
-            my @keys = keys % {$graph->{$m}};
-            my $upd_key = first {m/Update\b/} @keys;
-            push (@bins, @{$graph->{$m}{$upd_key}});
-        }
+    # Get the modules to which this package provides binaries.
+    my @existing_modules = grep{ exists( $graph->{$_}) } @{$module_ref};
+    my @arr;
+    foreach my $m (@existing_modules) {
+        # The refs point to a hash of hashes. We only care about the value with
+        # the codestream key. The Update key is different for every SLE
+        # Codestream so instead of maintaining a LUT we just use a regex for it.
+        my $upd_key = first {m/Update\b/} keys % {$graph->{$m}};
+        push (@arr, @{$graph->{$m}{$upd_key}});
     }
-    print Dumper(@bins);
-    return @bins;
+    return  map { $_->{'name'} => $_ } @arr;
 }
-
-#Get JSON of maintenance status
-my @packages = get_packages_in_RR(13024);
-
-my $incident_repos ="http://download.suse.de/ibs/SUSE:/Maintenance:/14916/SUSE_Updates_SLE-Module-Python2_15-SP1_x86_64/,http://download.suse.de/ibs/SUSE:/Maintenance:/14916/SUSE_Updates_SLE-Module-Basesystem_15-SP1_x86_64/";
-
-my @repos = split(',',$incident_repos);
-print Dumper(@repos);
-
-@repos = qw{ http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Basesystem_15-SP1_x86_64/ http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Server-Applications_15-SP1_x86_64/};
-
 
 sub zypper_search {
     my $params = shift;
@@ -74,6 +68,15 @@ sub zypper_search {
     return \@ret;
 }
 
+#Get JSON of maintenance status
+my @packages = get_packages_in_RR(13024);
+
+#my $incident_repos ="http://download.suse.de/ibs/SUSE:/Maintenance:/14916/SUSE_Updates_SLE-Module-Python2_15-SP1_x86_64/,http://download.suse.de/ibs/SUSE:/Maintenance:/14916/SUSE_Updates_SLE-Module-Basesystem_15-SP1_x86_64/";
+
+
+my @repos = qw{ http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Basesystem_15-SP1_x86_64/ http://download.suse.de/ibs/SUSE:/Maintenance:/13024/SUSE_Updates_SLE-Module-Server-Applications_15-SP1_x86_64/};
+print Dumper(@repos);
+
 
 my @modules;
 foreach (@repos){
@@ -83,17 +86,46 @@ foreach (@repos){
 }
 
 print "Packages: @packages, Modules: @modules\n";
-my @binaries;
+my %binaries;
 foreach my $p (@packages){
-    push( @binaries, get_bins_for_packageXmodule($p,\@modules));
+    %binaries = ( %binaries, get_bins_for_packageXmodule($p, \@modules));
 }
-print Dumper(@binaries);
-my @names = map {$_->{'name'}} @binaries;
-print Dumper(@names);
-my $seref = zypper_search("--match-exact -i @names");
-foreach ( @{$seref} ){
-    print "$_->{'version'}\n";
+
+
+my @l2 = grep{ ($binaries{$_}->{'supportstatus'} eq 'l2') } keys %binaries; 
+my @l3 = grep{ ($binaries{$_}->{'supportstatus'} eq 'l3') } keys %binaries;
+
+#my $seref = zypper_search("--match-exact -i @l2 @l3");
+#print Dumper( (@l2, @l3)  );
+foreach (@l2,@l3){
+    if ( !(system("rpm -q $_ 1>/dev/null")>>8) ) {
+        my $ver= qx(rpm -q --queryformat '%{VERSION}.%{RELEASE}' $_);
+        print  version->parse($ver)." ";
+        $binaries{$_}->{'oldversion'} = $ver ;
+    }
+    else{
+        $binaries{$_}->{'oldversion'}="Not installed";
+    }
+#    printf "%-20s %-20s\n",$_, $binaries{$_}->{'oldversion'}
 }
+
+foreach (@l2,@l3) {
+    if ( !(system("rpm -q $_ 1>/dev/null")>>8) ) {
+        $binaries{$_}->{'oldversion'} = qx(rpm -q --queryformat '%{VERSION}-%{RELEASE}' $_);
+    } else {
+        $binaries{$_}->{'oldversion'}="Not installed";
+    }
+    printf "%-20s %-20s\n",$_, $binaries{$_}->{'oldversion'}
+}
+
+
+# my %l2 = grep{ $_->{'supportstatus'} eq 'l2'} %binaries;
+# my %l3 = grep{ $_->{'supportstatus'} eq 'l3'} %binaries;
+# print Dumper(%l3);
+#my $seref = zypper_search("--match-exact -i @names");
+#foreach ( @{$seref} ){
+#    print "$_->{'version'}\n";
+#}
 #print Dumper($seref);
 
 #print "New: ".Dumper(@new_binaries);
